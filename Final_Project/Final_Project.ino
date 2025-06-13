@@ -1,7 +1,10 @@
-#include "Timer5.h"        //import Timer5 interrupt library
+#include "Timer5.h"   //import Timer5 interrupt library
 
 const int ADCPin = A1;
+const int DACPin = A0;
 const int frequency = 10000;
+const int resolution = 10;
+
 void AdcBooster() {
   ADC->CTRLA.bit.ENABLE = 0;  // Disable ADC
   while (ADC->STATUS.bit.SYNCBUSY == 1)
@@ -17,13 +20,22 @@ void AdcBooster() {
 }  // AdcBooster
 
 void setup() {
-  PinMode(ADCPin, INPUT);
+
+  pinMode(ADCPin, INPUT);
+  analogReadResolution(resolution);
+  pinMode(DACPin, OUTPUT);
+  analogWriteResolution(resolution);
   Serial.begin(9600);
   MyTimer5.begin(frequency);                      // 200=for toggle every 5msec
   MyTimer5.attachInterrupt(readADCSignal);  //Digital Pins=3 with Interrupts
+  AdcBooster();
+
+}
+
+void loop(){
+
 }
 
 void readADCSignal() {
-  analogRead(ADCPin);
-
+  analogWrite(DACPin, analogRead(ADCPin));
 }
