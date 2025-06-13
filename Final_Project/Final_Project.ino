@@ -5,6 +5,7 @@ const int DACPin = A0;
 const int frequency = 10000;
 const int resolution = 10;
 // filtering
+#define FILTER_ENABLED true
 const float deltaT = (1.0 / frequency);
 const float fc = 50.0;                   // Cutoff frequency in Hz
 const float RC = 1.0 / (2.0 * PI * fc);  // Time constant RC
@@ -49,6 +50,10 @@ void loop() {
 }
 
 void readADCSignal() {
- analogWrite(DACPin, filter(analogRead(ADCPin)));
-
+  #if FILTER_ENABLED
+    analogWrite(DACPin, filter(analogRead(ADCPin)));
+  #else 
+    analogWrite(DACPin, analogRead(ADCPin));
+  #endif
 }
+
