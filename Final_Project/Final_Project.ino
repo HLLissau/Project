@@ -2,15 +2,24 @@
 
 const int ADCPin = A1;
 const int DACPin = A0;
-const int frequency = 10000;   // max with disabled: 16370 no more than 16400
+const int testpin = 3;
+const int sampleFrequency = 10000;  // max with disabled: 16370 no more than 16400
 const int resolution = 10;
 // filtering
 #define FILTER_ENABLED true
-const float deltaT = (1.0 / frequency);
+const float deltaT = (1.0 / sampleFrequency);
 const float fc = 50.0;                   // Cutoff frequency in Hz
 const float RC = 1.0 / (2.0 * PI * fc);  // Time constant RC
 const float alpha = deltaT / (RC + deltaT);
 float y_prev = 0.0;  // Previous filtered value
+// zero-crossing
+const int treshold = 248;  // 248 is (0.8mV (offset) * 1023) / 3.3V
+#define TRESHOLD_CROSSING_COUNTER true
+volatile bool crossingFlag = false;
+int crossingCounter = 0;
+int sampleCounter = 0;
+const int amountBeforeCalculateFrequency = 10;
+const int measuredSampleRate = 10800;
 
 void AdcBooster() {
   ADC->CTRLA.bit.ENABLE = 0;  // Disable ADC
@@ -30,31 +39,56 @@ int filter(int x) {
   float result = alpha * x + (1.0 - alpha) * y_prev;
   y_prev = result;
   //Serial.println(result);
-  return (int) result;
+  return (int)result;
 }
 
+int zeroCrossing(int newMeasurement) {
+  static int lastMeasurement = 0;  // static so only the first time put it to zero
+  if (lastMeasurement >= treshold || newMeasurement < treshold) {
+    lastMeasurement = newMeasurement;
+    return false;
+  }
+  lastMeasurement = newMeasurement;
+  return true;
+}
 void setup() {
 
+  pinMode(testpin, OUTPUT);
   pinMode(ADCPin, INPUT);
   analogReadResolution(resolution);
   pinMode(DACPin, OUTPUT);
   analogWriteResolution(resolution);
-  
+
   Serial.begin(9600);
-  MyTimer5.begin(frequency);                // 200=for toggle every 5msec
+  MyTimer5.begin(sampleFrequency);          // 200=for toggle every 5msec
   MyTimer5.attachInterrupt(readADCSignal);  //Digital Pins=3 with Interrupts
   AdcBooster();
 }
 
 void loop() {
-
+  if (crossingFlag) {
+    crossingCounter = crossingCounter + 1;
+    crossingFlag = false;
+  }
+  if (crossingCounter >= amountBeforeCalculateFrequency) {
+    float result = crossingCounter / (sampleCounter * (1 / measuredSampleRate));
+    Serial.print("Frequency measured to: ");
+    Serial.println(result);
+  }
 }
-
 void readADCSignal() {
-  #if FILTER_ENABLED
-    analogWrite(DACPin, filter(analogRead(ADCPin)));
-  #else 
-    analogWrite(DACPin, analogRead(ADCPin));
-  #endif
-}
+  static int measuredValue = 0;
+#if FILTER_ENABLED
+  measuredValue = filter(analogRead(ADCPin));
+#else
+  measuredValue = analogRead(ADCPin);
+#endif
 
+#if TRESHOLD_CROSSING_COUNTER
+  if (zeroCrossing(measuredValue)) {
+    crossingFlag = true;
+  }
+#endif
+  analogWrite(DACPin, measuredValue);
+  sampleCounter = sampleCounter + 1;
+}
