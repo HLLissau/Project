@@ -2,7 +2,7 @@
 
 const int ADCPin = A1;
 const int DACPin = A0;
-const int frequency = 10000;
+const int frequency = 10000;   // max with disabled: 16370 no more than 16400
 const int resolution = 10;
 // filtering
 #define FILTER_ENABLED true
@@ -39,6 +39,7 @@ void setup() {
   analogReadResolution(resolution);
   pinMode(DACPin, OUTPUT);
   analogWriteResolution(resolution);
+  
   Serial.begin(9600);
   MyTimer5.begin(frequency);                // 200=for toggle every 5msec
   MyTimer5.attachInterrupt(readADCSignal);  //Digital Pins=3 with Interrupts
