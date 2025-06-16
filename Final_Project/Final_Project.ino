@@ -15,12 +15,12 @@ float y_prev = 0.0;  // Previous filtered value
 // zero-crossing
 const int treshold = 248;  // 248 is (0.8mV (offset) * 1023) / 3.3V
 #define TRESHOLD_CROSSING_COUNTER true
-volatile bool crossingFlag = false;
+volatile byte crossingFlag = 0;
 int crossingCounter = 0;
 int sampleCounter = 0;
-const int amountBeforeCalculateFrequency = 10;
-const int measuredSampleRate = 10800;
-
+const int amountBeforeCalculateFrequency = 100;
+const float measuredSampleRate = 10922;
+bool output = 0;
 void AdcBooster() {
   ADC->CTRLA.bit.ENABLE = 0;  // Disable ADC
   while (ADC->STATUS.bit.SYNCBUSY == 1)
@@ -66,14 +66,18 @@ void setup() {
 }
 
 void loop() {
-  if (crossingFlag) {
+
+  if (crossingFlag == 1) {
     crossingCounter = crossingCounter + 1;
-    crossingFlag = false;
-  }
-  if (crossingCounter >= amountBeforeCalculateFrequency) {
-    float result = crossingCounter / (sampleCounter * (1 / measuredSampleRate));
-    Serial.print("Frequency measured to: ");
-    Serial.println(result);
+
+    if (crossingCounter >= amountBeforeCalculateFrequency) {
+      float result = crossingCounter/(sampleCounter*(1 / measuredSampleRate));
+      Serial.print("Frequency measured to: ");
+      Serial.println(result);
+      crossingCounter = 0;
+      sampleCounter = 0;
+    } 
+     crossingFlag = 0;
   }
 }
 void readADCSignal() {
@@ -86,9 +90,15 @@ void readADCSignal() {
 
 #if TRESHOLD_CROSSING_COUNTER
   if (zeroCrossing(measuredValue)) {
-    crossingFlag = true;
+    crossingFlag = 1;
   }
 #endif
   analogWrite(DACPin, measuredValue);
   sampleCounter = sampleCounter + 1;
+  if (output){
+    digitalWrite(testpin, 1);
+  } else {
+     digitalWrite(testpin, 0);
+  }
+  output = !output;
 }
