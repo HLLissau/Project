@@ -21,12 +21,17 @@ volatile byte crossingFlag = 0;
 int crossingCounter = 0;
 int sampleCounter = 0;
 const int amountBeforeCalculateFrequency = 25;
-const float measuredSampleRate = 1.0907* sampleFrequency;
+const float measuredSampleRate = 1.0907 * sampleFrequency;
 bool output = 0;
 //interpolation  8
 #define INTERPOLATION_ENABLED true && TRESHOLD_CROSSING_COUNTER  //need threshhold crossing to work.
-
 int oldY = 0;
+//LED 10
+#define CONTROL_LED_ENABLED true
+const int lowFreqLED = 6;
+const int highFreqLED = 7;
+const float lowCutoffFreq = 49.975;
+const float highCutoffFreq = 50.025;
 
 
 void AdcBooster() {
@@ -69,6 +74,26 @@ float interpolateZeroCrossingTime() {
   float interpolatedTime = sampleCounter - x;
   return interpolatedTime;  // this function returns the interpolated time of the zero crossing
 }
+void controlLights(int state) {
+
+
+  switch (state) {
+    case 0:
+      digitalWrite(lowFreqLED, LOW);
+      digitalWrite(highFreqLED, LOW);
+      break;
+    case 1:
+      digitalWrite(lowFreqLED, HIGH);
+      digitalWrite(highFreqLED, LOW);
+      break;
+    case 2:
+      digitalWrite(lowFreqLED, LOW);
+      digitalWrite(highFreqLED, HIGH);
+      break;
+  }
+}
+
+
 void setup() {
 
   pinMode(testpin, OUTPUT);
@@ -76,6 +101,8 @@ void setup() {
   analogReadResolution(resolution);
   pinMode(DACPin, OUTPUT);
   analogWriteResolution(resolution);
+  pinMode(lowFreqLED, OUTPUT);
+  pinMode(highFreqLED, OUTPUT);
 
   Serial.begin(9600);
   MyTimer5.begin(sampleFrequency);          // 200=for toggle every 5msec
@@ -84,30 +111,44 @@ void setup() {
 }
 
 void loop() {
-
+  static float calculatedFreq;
   if (crossingFlag == 1) {
-
-    //interpolation of zero-crossing
-    #if INTERPOLATION_ENABLED 
-    static float lastInterpolatedTime = 0;
-      float interpolatedTime = interpolateZeroCrossingTime();
-      float period = interpolatedTime - lastInterpolatedTime;
-      float interpolatedFreq = measuredSampleRate/period;
-      Serial.print("Freq (interpolated): ");
-      Serial.println(interpolatedFreq, 2);  // 3 decimal places
-      lastInterpolatedTime = interpolatedTime;
-    #else // use simple zero-crossing (average over "amountBeforeCalculateFrequency" periods)
+    crossingFlag = 0;
     crossingCounter = crossingCounter + 1;
 
     if (crossingCounter >= amountBeforeCalculateFrequency) {
-      float result = crossingCounter / (sampleCounter * (1 / measuredSampleRate));
-      Serial.print("Frequency:[Hz] ");
-      Serial.println(result,2);
       crossingCounter = 0;
+//interpolation of zero-crossing
+#if INTERPOLATION_ENABLED
+      static float lastInterpolatedTime = 0;
+      float interpolatedTime = interpolateZeroCrossingTime();
+      float period = interpolatedTime - lastInterpolatedTime;
+      calculatedFreq = (measuredSampleRate / period) * amountBeforeCalculateFrequency;
+      //Serial.print("Freq (interpolated): ");
+      Serial.println(calculatedFreq, 2);  // 3 decimal places
+      lastInterpolatedTime = interpolatedTime;
+#else  // use simple zero-crossing (average over "amountBeforeCalculateFrequency" periods)
+
+      calculatedFreq = crossingCounter / (sampleCounter * (1 / measuredSampleRate));
+      // Serial.print("Frequency:[Hz] ");
+      // Serial.println(calculatedFreq, 2);
+
       sampleCounter = 0;
+
+#endif
     }
-    #endif
-    crossingFlag = 0;
+
+#if CONTROL_LED_ENABLED
+
+    if (calculatedFreq < lowCutoffFreq) {
+      controlLights(1);
+    } else if (calculatedFreq > highCutoffFreq) {
+      controlLights(2);
+    } else {
+      controlLights(0);
+    }
+
+#endif
   }
 }
 
