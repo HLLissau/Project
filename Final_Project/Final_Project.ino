@@ -20,9 +20,8 @@ int lastMeasurement = 0;  // static so only the first time put it to zero
 volatile byte crossingFlag = 0;
 int crossingCounter = 0;
 int sampleCounter = 0;
-const int amountBeforeCalculateFrequency = 50;
+const int amountBeforeCalculateFrequency = 25;
 const float measuredSampleRate = 1.0923 * sampleFrequency;
-bool output = 0;
 //interpolation  8
 #define INTERPOLATION_ENABLED true && TRESHOLD_CROSSING_COUNTER  //need threshhold crossing to work.
 int oldY = 0;
@@ -36,6 +35,8 @@ const float highCutoffFreq = 50.025;
 #define RMS_ENABLED true
 int amountOfRMSDataPoints = 0;
 float samples=0;
+float scalingFactor =1.009;
+float conversion =  scalingFactor*(3.3/1023.0);
 
 void AdcBooster() {
   ADC->CTRLA.bit.ENABLE = 0;  // Disable ADC
@@ -148,10 +149,9 @@ void loop() {
 
       float rms = sqrt((samples) / amountOfRMSDataPoints);
       //float voltRMS = (rms/3.3)*240.0;
-      float voltRMS = (rms);
       samples = 0;
       amountOfRMSDataPoints=0;
-       Serial.println(voltRMS,4);
+       Serial.println(rms,4);
      
 #endif
     }
@@ -170,7 +170,10 @@ void loop() {
 #endif
 }
 
+
 void readADCSignal() {
+   digitalWrite(testpin, 1); // set output for verification of interupt time
+  /**/
   static int measuredValue = 0;
   // filtering
   int readValue = analogRead(ADCPin);
@@ -181,10 +184,9 @@ void readADCSignal() {
 #endif
 // saving for RMS
 #if RMS_ENABLED
-  float readValuesInVolts = (((float)readValue-treshold)/1023.0)*3.3;
+  float readValuesInVolts = ((float)readValue-treshold)* conversion;
   samples = samples + (readValuesInVolts * readValuesInVolts);
   amountOfRMSDataPoints = amountOfRMSDataPoints +1;
-
 #endif
 // zero crossing
 #if TRESHOLD_CROSSING_COUNTER
@@ -192,16 +194,7 @@ void readADCSignal() {
     crossingFlag = 1;
   }
 #endif
-
-
   analogWrite(DACPin, measuredValue);
   sampleCounter = sampleCounter + 1;
-
-  // to plot the real sampling frequency
-  if (output) {
-    digitalWrite(testpin, 1);
-  } else {
     digitalWrite(testpin, 0);
-  }
-  output = !output;
 }
