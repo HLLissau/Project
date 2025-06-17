@@ -1,5 +1,5 @@
 #include "Timer5.h"  //import Timer5 interrupt library
-
+#include <math.h>
 const int ADCPin = A1;
 const int DACPin = A0;
 const int testpin = 3;
@@ -20,7 +20,7 @@ int lastMeasurement = 0;  // static so only the first time put it to zero
 volatile byte crossingFlag = 0;
 int crossingCounter = 0;
 int sampleCounter = 0;
-const int amountBeforeCalculateFrequency = 25;
+const int amountBeforeCalculateFrequency = 50;
 const float measuredSampleRate = 1.0923 * sampleFrequency;
 bool output = 0;
 //interpolation  8
@@ -32,7 +32,10 @@ const int lowFreqLED = 6;
 const int highFreqLED = 7;
 const float lowCutoffFreq = 49.975;
 const float highCutoffFreq = 50.025;
-
+// RMS step12
+#define RMS_ENABLED true
+int amountOfRMSDataPoints = 0;
+float samples=0;
 
 void AdcBooster() {
   ADC->CTRLA.bit.ENABLE = 0;  // Disable ADC
@@ -71,7 +74,7 @@ float interpolateZeroCrossingTime() {
   float y1f = (float)lastMeasurement;
   float y0f = (float)oldY;
   float x = (y1f - (float)treshold) / (y1f - y0f);  // Linear interpolation factor (0 to 1)
-  float interpolatedTime = sampleCounter - x;
+  float interpolatedTime = (sampleCounter - x);
   return interpolatedTime;  // this function returns the interpolated time of the zero crossing
 }
 void controlLights(int state) {
@@ -117,16 +120,19 @@ void loop() {
     crossingCounter = crossingCounter + 1;
 
     if (crossingCounter >= amountBeforeCalculateFrequency) {
+      static int beginSampleCounter=0;
+      beginSampleCounter = sampleCounter;
       crossingCounter = 0;
 //interpolation of zero-crossing
 #if INTERPOLATION_ENABLED
       static float lastInterpolatedTime = 0;
       float interpolatedTime = interpolateZeroCrossingTime();
-      float period = interpolatedTime - lastInterpolatedTime;
+      float period = (interpolatedTime - lastInterpolatedTime);
       calculatedFreq = (measuredSampleRate / period) * amountBeforeCalculateFrequency;
       //Serial.print("Freq (interpolated): ");
       //Serial.println(calculatedFreq, 2);  // 3 decimal places
       lastInterpolatedTime = interpolatedTime;
+
 #else  // use simple zero-crossing (average over "amountBeforeCalculateFrequency" periods)
 
       calculatedFreq = crossingCounter / (sampleCounter * (1 / measuredSampleRate));
@@ -135,32 +141,50 @@ void loop() {
 
       sampleCounter = 0;
 
+
+#endif
+
+#if RMS_ENABLED
+
+      float rms = sqrt((samples) / amountOfRMSDataPoints);
+      float voltRMS = (rms/3.3)*240.0;
+      samples = 0;
+      amountOfRMSDataPoints=0;
+       Serial.println(voltRMS,4);
+     
 #endif
     }
+  }
 
 #if CONTROL_LED_ENABLED
 
-    if (calculatedFreq < lowCutoffFreq) {
-      controlLights(1);
-    } else if (calculatedFreq > highCutoffFreq) {
-      controlLights(2);
-    } else {
-      controlLights(0);
-    }
+  if (calculatedFreq < lowCutoffFreq) {
+    controlLights(1);
+  } else if (calculatedFreq > highCutoffFreq) {
+    controlLights(2);
+  } else {
+    controlLights(0);
+  }
 
 #endif
-  }
 }
 
 void readADCSignal() {
   static int measuredValue = 0;
-// filtering
+  // filtering
+  int readValue = analogRead(ADCPin);
 #if FILTER_ENABLED
-  measuredValue = filter(analogRead(ADCPin));
+  measuredValue = filter(readValue);
 #else
-  measuredValue = analogRead(ADCPin);
+  measuredValue = readValue;
 #endif
+// saving for RMS
+#if RMS_ENABLED
+  float readValuesInVolts = ((float)readValue/1023.0)*3.3;
+  samples = samples + (readValuesInVolts * readValuesInVolts);
+  amountOfRMSDataPoints = amountOfRMSDataPoints +1;
 
+#endif
 // zero crossing
 #if TRESHOLD_CROSSING_COUNTER
   if (zeroCrossing(measuredValue)) {
