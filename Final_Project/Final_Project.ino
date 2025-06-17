@@ -15,12 +15,20 @@ float y_prev = 0.0;  // Previous filtered value
 // zero-crossing
 const int treshold = 248;  // 248 is (0.8mV (offset) * 1023) / 3.3V
 #define TRESHOLD_CROSSING_COUNTER true
+int lastMeasurement = 0;  // static so only the first time put it to zero
+
 volatile byte crossingFlag = 0;
 int crossingCounter = 0;
 int sampleCounter = 0;
-const int amountBeforeCalculateFrequency = 100;
-const float measuredSampleRate = 10922;
+const int amountBeforeCalculateFrequency = 25;
+const float measuredSampleRate = 1.0907* sampleFrequency;
 bool output = 0;
+//interpolation  8
+#define INTERPOLATION_ENABLED true && TRESHOLD_CROSSING_COUNTER  //need threshhold crossing to work.
+
+int oldY = 0;
+
+
 void AdcBooster() {
   ADC->CTRLA.bit.ENABLE = 0;  // Disable ADC
   while (ADC->STATUS.bit.SYNCBUSY == 1)
@@ -42,14 +50,24 @@ int filter(int x) {
   return (int)result;
 }
 
-int zeroCrossing(int newMeasurement) {
-  static int lastMeasurement = 0;  // static so only the first time put it to zero
-  if (lastMeasurement >= treshold || newMeasurement < treshold) {
-    lastMeasurement = newMeasurement;
+int zeroCrossing(int y) {
+  if (lastMeasurement >= treshold || y < treshold) {
+    lastMeasurement = y;
     return false;
   }
-  lastMeasurement = newMeasurement;
+  oldY = lastMeasurement;
+  lastMeasurement = y;
   return true;
+}
+
+float interpolateZeroCrossingTime() {
+  // y1 is current value, y0 is previous value, t1 is current sample index
+  // y1 > threshold, y0 < threshold => rising zero-crossing
+  float y1f = (float)lastMeasurement;
+  float y0f = (float)oldY;
+  float x = (y1f - (float)treshold) / (y1f - y0f);  // Linear interpolation factor (0 to 1)
+  float interpolatedTime = sampleCounter - x;
+  return interpolatedTime;  // this function returns the interpolated time of the zero crossing
 }
 void setup() {
 
@@ -68,37 +86,56 @@ void setup() {
 void loop() {
 
   if (crossingFlag == 1) {
+
+    //interpolation of zero-crossing
+    #if INTERPOLATION_ENABLED 
+    static float lastInterpolatedTime = 0;
+      float interpolatedTime = interpolateZeroCrossingTime();
+      float period = interpolatedTime - lastInterpolatedTime;
+      float interpolatedFreq = measuredSampleRate/period;
+      Serial.print("Freq (interpolated): ");
+      Serial.println(interpolatedFreq, 2);  // 3 decimal places
+      lastInterpolatedTime = interpolatedTime;
+    #else // use simple zero-crossing (average over "amountBeforeCalculateFrequency" periods)
     crossingCounter = crossingCounter + 1;
 
     if (crossingCounter >= amountBeforeCalculateFrequency) {
-      float result = crossingCounter/(sampleCounter*(1 / measuredSampleRate));
-      Serial.print("Frequency measured to: ");
-      Serial.println(result);
+      float result = crossingCounter / (sampleCounter * (1 / measuredSampleRate));
+      Serial.print("Frequency:[Hz] ");
+      Serial.println(result,2);
       crossingCounter = 0;
       sampleCounter = 0;
-    } 
-     crossingFlag = 0;
+    }
+    #endif
+    crossingFlag = 0;
   }
 }
+
 void readADCSignal() {
   static int measuredValue = 0;
+// filtering
 #if FILTER_ENABLED
   measuredValue = filter(analogRead(ADCPin));
 #else
   measuredValue = analogRead(ADCPin);
 #endif
 
+// zero crossing
 #if TRESHOLD_CROSSING_COUNTER
   if (zeroCrossing(measuredValue)) {
     crossingFlag = 1;
   }
 #endif
+
+
   analogWrite(DACPin, measuredValue);
   sampleCounter = sampleCounter + 1;
-  if (output){
+
+  // to plot the real sampling frequency
+  if (output) {
     digitalWrite(testpin, 1);
   } else {
-     digitalWrite(testpin, 0);
+    digitalWrite(testpin, 0);
   }
   output = !output;
 }
