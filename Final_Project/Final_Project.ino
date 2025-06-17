@@ -147,7 +147,8 @@ void loop() {
 #if RMS_ENABLED
 
       float rms = sqrt((samples) / amountOfRMSDataPoints);
-      float voltRMS = (rms/3.3)*240.0;
+      //float voltRMS = (rms/3.3)*240.0;
+      float voltRMS = (rms);
       samples = 0;
       amountOfRMSDataPoints=0;
        Serial.println(voltRMS,4);
@@ -180,7 +181,7 @@ void readADCSignal() {
 #endif
 // saving for RMS
 #if RMS_ENABLED
-  float readValuesInVolts = ((float)readValue/1023.0)*3.3;
+  float readValuesInVolts = (((float)readValue-treshold)/1023.0)*3.3;
   samples = samples + (readValuesInVolts * readValuesInVolts);
   amountOfRMSDataPoints = amountOfRMSDataPoints +1;
 
