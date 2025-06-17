@@ -21,7 +21,7 @@ volatile byte crossingFlag = 0;
 int crossingCounter = 0;
 int sampleCounter = 0;
 const int amountBeforeCalculateFrequency = 25;
-const float measuredSampleRate = 1.0907 * sampleFrequency;
+const float measuredSampleRate = 1.0923 * sampleFrequency;
 bool output = 0;
 //interpolation  8
 #define INTERPOLATION_ENABLED true && TRESHOLD_CROSSING_COUNTER  //need threshhold crossing to work.
@@ -125,7 +125,7 @@ void loop() {
       float period = interpolatedTime - lastInterpolatedTime;
       calculatedFreq = (measuredSampleRate / period) * amountBeforeCalculateFrequency;
       //Serial.print("Freq (interpolated): ");
-      Serial.println(calculatedFreq, 2);  // 3 decimal places
+      //Serial.println(calculatedFreq, 2);  // 3 decimal places
       lastInterpolatedTime = interpolatedTime;
 #else  // use simple zero-crossing (average over "amountBeforeCalculateFrequency" periods)
 
