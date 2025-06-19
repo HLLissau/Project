@@ -1,8 +1,11 @@
 #include "Timer5.h"  //import Timer5 interrupt library
 #include <math.h>
+#include <LiquidCrystal.h>  // Include the LCD library
+// Initialize the LCD with the pin numbers: (RS, E, D4, D5, D6, D7)
+LiquidCrystal lcd(12, 11, 2, 3, 4, 5);
 const int ADCPin = A1;
 const int DACPin = A0;
-const int testpin = 3;
+const int testpin = 10;
 const int sampleFrequency = 10000;  // max with disabled: 16370 no more than 16400
 const int resolution = 10;
 // filtering
@@ -16,7 +19,6 @@ float y_prev = 0.0;  // Previous filtered value
 const int treshold = 248;  // 248 is (0.8mV (offset) * 1023) / 3.3V
 #define TRESHOLD_CROSSING_COUNTER true
 int lastMeasurement = 0;  // static so only the first time put it to zero
-
 volatile byte crossingFlag = 0;
 int crossingCounter = 0;
 int sampleCounter = 0;
@@ -27,17 +29,50 @@ const float measuredSampleRate = 1.0923 * sampleFrequency;
 int oldY = 0;
 //LED 10
 #define CONTROL_LED_ENABLED true
-const int lowFreqLED = 6;
+const int lowFreqLED = 8;
 const int highFreqLED = 7;
 const float lowCutoffFreq = 49.975;
 const float highCutoffFreq = 50.025;
 // RMS step12
 #define RMS_ENABLED true
 int amountOfRMSDataPoints = 0;
-float samples=0;
-float scalingFactor =1.009;
-float conversion =  scalingFactor*(3.3/1023.0);
+float samples = 0;
+float scalingFactor = 1.009;
+float conversion = scalingFactor * (3.3 / 1023.0);
+// DROOP
+#define DROOP_CONTROL_ENABLED true
+const float f1 = 49.9;
+const float f2 = 50.1;
+const float i1 = 6;
+const float i2 = 80;
+const float droopConstant = (f2 - f1) / (i2 - i1);
+const float droopIntercept = f1 - (droopConstant * i1);
+const float droopCurrentConstant = 1 / droopConstant;
+const float droopCurrentIntercept = -droopIntercept / droopConstant;
+float current = 0;
+//PWM
+// we define all constant to generalize the study case
+// First slope
+const float PWMFirstCurrent1 = 6;
+const float PWMFirstCurrent2 = 52;
+const float PWMFirstDutyCycle1 = 10;
+const float PWMFirstDutyCycle2 = 85;
+const float PWMDroopConstant1 = (PWMFirstCurrent2 - PWMFirstCurrent1) / (PWMFirstDutyCycle2 - PWMFirstDutyCycle1);
+const float PWMDroopIntercept1 = PWMFirstCurrent1 - (PWMDroopConstant1 * PWMFirstDutyCycle1);
+const float PWMDroopConstantInverse1 = 1 / PWMDroopConstant1;
+const float PWMDroopInterceptInverse1 = -PWMDroopIntercept1 / PWMDroopConstant1;
+// Second slope
+const float PWMSecondCurrent1 = 52.5;
+const float PWMSecondCurrent2 = 80;
+const float PWMSecondDutyCycle1 = 85;
+const float PWMSecondDutyCycle2 = 96;
+const float PWMDroopConstant2 = (PWMSecondCurrent2 - PWMSecondCurrent1) / (PWMSecondDutyCycle2 - PWMSecondDutyCycle1);
+const float PWMDroopIntercept2 = PWMSecondCurrent1 - (PWMDroopConstant2 * PWMSecondDutyCycle1);
+const float PWMDroopConstantInverse2 = 1 / PWMDroopConstant2;
+const float PWMDroopInterceptInverse2 = -PWMDroopIntercept2 / PWMDroopConstant2;
 
+// %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% FUNCTIONS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+// AdcBooster
 void AdcBooster() {
   ADC->CTRLA.bit.ENABLE = 0;  // Disable ADC
   while (ADC->STATUS.bit.SYNCBUSY == 1)
@@ -50,15 +85,15 @@ void AdcBooster() {
   ADC->CTRLA.bit.ENABLE = 1;                      // Enable ADC
   while (ADC->STATUS.bit.SYNCBUSY == 1)
     ;  // Wait for synchronization
-}  // AdcBooster
-
+}
+// filter function
 int filter(int x) {
   float result = alpha * x + (1.0 - alpha) * y_prev;
   y_prev = result;
   //Serial.println(result);
   return (int)result;
 }
-
+// zero crossing function
 int zeroCrossing(int y) {
   if (lastMeasurement >= treshold || y < treshold) {
     lastMeasurement = y;
@@ -68,7 +103,7 @@ int zeroCrossing(int y) {
   lastMeasurement = y;
   return true;
 }
-
+// interpolate zero crossing function
 float interpolateZeroCrossingTime() {
   // y1 is current value, y0 is previous value, t1 is current sample index
   // y1 > threshold, y0 < threshold => rising zero-crossing
@@ -78,9 +113,8 @@ float interpolateZeroCrossingTime() {
   float interpolatedTime = (sampleCounter - x);
   return interpolatedTime;  // this function returns the interpolated time of the zero crossing
 }
+// control lights function
 void controlLights(int state) {
-
-
   switch (state) {
     case 0:
       digitalWrite(lowFreqLED, LOW);
@@ -96,10 +130,36 @@ void controlLights(int state) {
       break;
   }
 }
+void printToLCD(String toPrint, int lineNumber) {
 
+  lcd.setCursor(0, lineNumber);  // Go to second line
+  lcd.print(toPrint + " ");      // writing an extra blank space to delete duplicate caracters if string is shorter than last string
+}
+float currentRequest(float frequency) {
+  // NEW FCR-N
+  if ((frequency >= f1) && (frequency <= f2)) {
+    return frequency * droopCurrentConstant + droopCurrentIntercept;
+  } else if (frequency > f2) {
+    return 80.0;
+  } else {
+    return 0.0;
+  }
+}
+float PWMRequest(float current) {
+  if (current < 6) {
+    return 0.0;
+  } else if (current < 52) {
+    return current * PWMDroopConstantInverse1 + PWMDroopInterceptInverse1;
+  } else if (current > 52.5) {
+    return current * PWMDroopConstantInverse2 + PWMDroopInterceptInverse2;
+  } else {
+    return 85;
+  }
+}
 
+// %%%%%%%%%%%%%%%%%%%%%%%%%%%%% SETUP %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 void setup() {
-
+  lcd.begin(16, 2);  // Set up the LCD with 16 columns and 2 rows
   pinMode(testpin, OUTPUT);
   pinMode(ADCPin, INPUT);
   analogReadResolution(resolution);
@@ -113,7 +173,7 @@ void setup() {
   MyTimer5.attachInterrupt(readADCSignal);  //Digital Pins=3 with Interrupts
   AdcBooster();
 }
-
+// %%%%%%%%%%%%%%%%%%%%%%%%%%%%% LOOP %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 void loop() {
   static float calculatedFreq;
   if (crossingFlag == 1) {
@@ -121,10 +181,11 @@ void loop() {
     crossingCounter = crossingCounter + 1;
 
     if (crossingCounter >= amountBeforeCalculateFrequency) {
-      static int beginSampleCounter=0;
+      static int beginSampleCounter = 0;
       beginSampleCounter = sampleCounter;
       crossingCounter = 0;
-//interpolation of zero-crossing
+
+// interpolation of zero-crossing
 #if INTERPOLATION_ENABLED
       static float lastInterpolatedTime = 0;
       float interpolatedTime = interpolateZeroCrossingTime();
@@ -133,32 +194,34 @@ void loop() {
       //Serial.print("Freq (interpolated): ");
       //Serial.println(calculatedFreq, 2);  // 3 decimal places
       lastInterpolatedTime = interpolatedTime;
-
 #else  // use simple zero-crossing (average over "amountBeforeCalculateFrequency" periods)
-
       calculatedFreq = crossingCounter / (sampleCounter * (1 / measuredSampleRate));
       // Serial.print("Frequency:[Hz] ");
       // Serial.println(calculatedFreq, 2);
 
       sampleCounter = 0;
-
-
 #endif
+      printToLCD("FREQ: " + String(calculatedFreq, 3) + " Hz", 0);
 
+// RMS calculation
 #if RMS_ENABLED
-
       float rms = sqrt((samples) / amountOfRMSDataPoints);
       //float voltRMS = (rms/3.3)*240.0;
       samples = 0;
-      amountOfRMSDataPoints=0;
-       Serial.println(rms,4);
-     
+      amountOfRMSDataPoints = 0;
+      //printToLCD("VOLT:  " + String(rms) + " V", 1);
+#endif
+#if DROOP_CONTROL_ENABLED
+      current = currentRequest(calculatedFreq);
+      float pWMDutyCycle = PWMRequest(current);
+      //   printToLCD("cur:  " + String(current) + " A", 1);
+      printToLCD("PWM:  " + String(pWMDutyCycle) + " %", 1);
+
 #endif
     }
   }
 
 #if CONTROL_LED_ENABLED
-
   if (calculatedFreq < lowCutoffFreq) {
     controlLights(1);
   } else if (calculatedFreq > highCutoffFreq) {
@@ -166,15 +229,15 @@ void loop() {
   } else {
     controlLights(0);
   }
-
 #endif
 }
 
+// %%%%%%%%%%%%%%%%%%%%%%%%%%%%% ISR %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 void readADCSignal() {
-   digitalWrite(testpin, 1); // set output for verification of interupt time
-  /**/
+  digitalWrite(testpin, 1);  // set output for verification of interupt time
   static int measuredValue = 0;
+
   // filtering
   int readValue = analogRead(ADCPin);
 #if FILTER_ENABLED
@@ -182,19 +245,22 @@ void readADCSignal() {
 #else
   measuredValue = readValue;
 #endif
+
 // saving for RMS
 #if RMS_ENABLED
-  float readValuesInVolts = ((float)readValue-treshold)* conversion;
+  float readValuesInVolts = ((float)readValue - treshold) * conversion;
   samples = samples + (readValuesInVolts * readValuesInVolts);
-  amountOfRMSDataPoints = amountOfRMSDataPoints +1;
+  amountOfRMSDataPoints = amountOfRMSDataPoints + 1;
 #endif
+
 // zero crossing
 #if TRESHOLD_CROSSING_COUNTER
   if (zeroCrossing(measuredValue)) {
     crossingFlag = 1;
   }
 #endif
+
   analogWrite(DACPin, measuredValue);
   sampleCounter = sampleCounter + 1;
-    digitalWrite(testpin, 0);
+  digitalWrite(testpin, 0);
 }
