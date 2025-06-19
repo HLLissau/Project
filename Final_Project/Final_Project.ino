@@ -29,8 +29,8 @@ const float measuredSampleRate = 1.0923 * sampleFrequency;
 int oldY = 0;
 //LED 10
 #define CONTROL_LED_ENABLED true
-const int lowFreqLED = 8;
-const int highFreqLED = 7;
+const int lowFreqLED = 14;
+const int highFreqLED = 13;
 const float lowCutoffFreq = 49.975;
 const float highCutoffFreq = 50.025;
 // RMS step12
@@ -70,6 +70,12 @@ const float PWMDroopConstant2 = (PWMSecondCurrent2 - PWMSecondCurrent1) / (PWMSe
 const float PWMDroopIntercept2 = PWMSecondCurrent1 - (PWMDroopConstant2 * PWMSecondDutyCycle1);
 const float PWMDroopConstantInverse2 = 1 / PWMDroopConstant2;
 const float PWMDroopInterceptInverse2 = -PWMDroopIntercept2 / PWMDroopConstant2;
+//PWM output
+// Output 250kHz PWM on timer TCC0 (6-bit resolution)
+const int pWMfreq = 96 * 250;  //1kHz
+float pWMDutyCycle = 0.80;
+const int pWMPin = 7;
+
 
 // %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% FUNCTIONS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 // AdcBooster
@@ -149,13 +155,66 @@ float PWMRequest(float current) {
   if (current < 6) {
     return 0.0;
   } else if (current < 52) {
-    return current * PWMDroopConstantInverse1 + PWMDroopInterceptInverse1;
+    return 0.01 * (current * PWMDroopConstantInverse1 + PWMDroopInterceptInverse1);
   } else if (current > 52.5) {
-    return current * PWMDroopConstantInverse2 + PWMDroopInterceptInverse2;
+    return 0.01 *( current * PWMDroopConstantInverse2 + PWMDroopInterceptInverse2);
   } else {
-    return 85;
+    return 0.85;
   }
 }
+
+
+void PWMsetup() {
+  REG_GCLK_GENDIV = GCLK_GENDIV_DIV(1) |  // Divide the 48MHz clock source by divisor 1: 48MHz/1=48MHz
+                    GCLK_GENDIV_ID(4);    // Select Generic Clock (GCLK) 4
+  while (GCLK->STATUS.bit.SYNCBUSY)
+    ;  // Wait for synchronization
+
+  REG_GCLK_GENCTRL = GCLK_GENCTRL_IDC |          // Set the duty cycle to 50/50 HIGH/LOW
+                     GCLK_GENCTRL_GENEN |        // Enable GCLK4
+                     GCLK_GENCTRL_SRC_DFLL48M |  // Set the 48MHz clock source
+                     GCLK_GENCTRL_ID(4);         // Select GCLK4
+  while (GCLK->STATUS.bit.SYNCBUSY)
+    ;  // Wait for synchronization
+
+  // Enable the port multiplexer for the digital pin D7
+  PORT->Group[g_APinDescription[pWMPin].ulPort].PINCFG[g_APinDescription[pWMPin].ulPin].bit.PMUXEN = 1;
+
+  // Connect the TCC0 timer to digital output D7 - port pins are paired odd PMUO and even PMUXE
+  // F & E specify the timers: TCC0, TCC1 and TCC2
+  PORT->Group[g_APinDescription[6].ulPort].PMUX[g_APinDescription[6].ulPin >> 1].reg = PORT_PMUX_PMUXO_F;
+
+  // Feed GCLK4 to TCC0 and TCC1
+  REG_GCLK_CLKCTRL = GCLK_CLKCTRL_CLKEN |        // Enable GCLK4 to TCC0 and TCC1
+                     GCLK_CLKCTRL_GEN_GCLK4 |    // Select GCLK4
+                     GCLK_CLKCTRL_ID_TCC0_TCC1;  // Feed GCLK4 to TCC0 and TCC1
+  while (GCLK->STATUS.bit.SYNCBUSY)
+    ;  // Wait for synchronization
+
+  // Dual slope PWM operation: timers countinuously count up to PER register value then down 0
+  REG_TCC0_WAVE |= TCC_WAVE_POL(0xF) |       // Reverse the output polarity on all TCC0 outputs
+                   TCC_WAVE_WAVEGEN_DSBOTH;  // Setup dual slope PWM on TCC0
+  while (TCC0->SYNCBUSY.bit.WAVE)
+    ;  // Wait for synchronization
+
+  // Each timer counts up to a maximum or TOP value set by the PER register,
+  // this determines the frequency of the PWM operation:
+  REG_TCC0_PER = pWMfreq;  // Set the frequency of the PWM on TCC0 to 1kHz
+  while (TCC0->SYNCBUSY.bit.PER)
+    ;  // Wait for synchronization
+
+  // Set the PWM signal to output 50% duty cycle
+  REG_TCC0_CC3 = pWMDutyCycle * pWMfreq;  // TCC0 CC3 - on D7
+  while (TCC0->SYNCBUSY.bit.CC3)
+    ;  // Wait for synchronization
+
+  // Divide the 48MHz signal by 1 giving 48MHz (20.83ns) TCC0 timer tick and enable the outputs
+  REG_TCC0_CTRLA |= TCC_CTRLA_PRESCALER_DIV1 |  // Divide GCLK4 by 1
+                    TCC_CTRLA_ENABLE;           // Enable the TCC0 output
+  while (TCC0->SYNCBUSY.bit.ENABLE)
+    ;  // Wait for synchronization
+}
+
 
 // %%%%%%%%%%%%%%%%%%%%%%%%%%%%% SETUP %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 void setup() {
@@ -172,6 +231,7 @@ void setup() {
   MyTimer5.begin(sampleFrequency);          // 200=for toggle every 5msec
   MyTimer5.attachInterrupt(readADCSignal);  //Digital Pins=3 with Interrupts
   AdcBooster();
+  PWMsetup();
 }
 // %%%%%%%%%%%%%%%%%%%%%%%%%%%%% LOOP %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 void loop() {
@@ -213,9 +273,11 @@ void loop() {
 #endif
 #if DROOP_CONTROL_ENABLED
       current = currentRequest(calculatedFreq);
-      float pWMDutyCycle = PWMRequest(current);
+      pWMDutyCycle = PWMRequest(current);
+      REG_TCC0_CC3 = pWMDutyCycle * pWMfreq;  // TCC0 CC3 - on D7
+
       //   printToLCD("cur:  " + String(current) + " A", 1);
-      printToLCD("PWM:  " + String(pWMDutyCycle) + " %", 1);
+      printToLCD("PWM:  " + String(100 * pWMDutyCycle) + " %", 1);
 
 #endif
     }
