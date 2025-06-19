@@ -1,11 +1,13 @@
+#include "arduino_secrets.h"
+#include "thingProperties.h"
 #include "Timer5.h"  //import Timer5 interrupt library
 #include <math.h>
 #include <LiquidCrystal.h>  // Include the LCD library
 // Initialize the LCD with the pin numbers: (RS, E, D4, D5, D6, D7)
-LiquidCrystal lcd(12, 11, 2, 3, 4, 5);
+LiquidCrystal lcd(0,1, 2, 3, 4, 5);
 const int ADCPin = A1;
 const int DACPin = A0;
-const int testpin = 10;
+const int testpin = 8;
 const int sampleFrequency = 10000;  // max with disabled: 16370 no more than 16400
 const int resolution = 10;
 // filtering
@@ -75,6 +77,9 @@ const float PWMDroopInterceptInverse2 = -PWMDroopIntercept2 / PWMDroopConstant2;
 const int pWMfreq = 96 * 250;  //1kHz
 float pWMDutyCycle = 0.80;
 const int pWMPin = 7;
+// Cloud
+#define CLOUD_ENABLED false
+
 
 
 // %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% FUNCTIONS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -215,8 +220,28 @@ void PWMsetup() {
     ;  // Wait for synchronization
 }
 
+void arduinoCloudSetup(){
+  // This delay gives the chance to wait for a Serial Monitor without blocking if none is found
+  delay(1500); 
 
-// %%%%%%%%%%%%%%%%%%%%%%%%%%%%% SETUP %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  // Defined in thingProperties.h
+  initProperties();
+
+  // Connect to Arduino IoT Cloud
+  ArduinoCloud.begin(ArduinoIoTPreferredConnection);
+  
+  /*
+     The following function allows you to obtain more information
+     related to the state of network and IoT Cloud connection and errors
+     the higher number the more granular information you’ll get.
+     The default is 0 (only errors).
+     Maximum is 4
+ */
+  setDebugMessageLevel(2);
+  ArduinoCloud.printDebugInfo();
+}
+
+
 void setup() {
   lcd.begin(16, 2);  // Set up the LCD with 16 columns and 2 rows
   pinMode(testpin, OUTPUT);
@@ -232,9 +257,12 @@ void setup() {
   MyTimer5.attachInterrupt(readADCSignal);  //Digital Pins=3 with Interrupts
   AdcBooster();
   PWMsetup();
+  arduinoCloudSetup();
 }
-// %%%%%%%%%%%%%%%%%%%%%%%%%%%%% LOOP %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 void loop() {
+  // Your code here 
+  
   static float calculatedFreq;
   if (crossingFlag == 1) {
     crossingFlag = 0;
@@ -280,6 +308,12 @@ void loop() {
       printToLCD("PWM:  " + String(100 * pWMDutyCycle) + " %", 1);
 
 #endif
+      #if CLOUD_ENABLED
+      cloudPWM = 100 * pWMDutyCycle;
+      cloudFrequency = calculatedFreq;
+      cloudVoltage = rms;
+    ArduinoCloud.update();
+      #endif
     }
   }
 
@@ -326,3 +360,4 @@ void readADCSignal() {
   sampleCounter = sampleCounter + 1;
   digitalWrite(testpin, 0);
 }
+
