@@ -6,17 +6,24 @@
 const char SSID[]     = SECRET_SSID;    // Network SSID (name)
 const char PASS[]     = SECRET_OPTIONAL_PASS;    // Network password (use for WPA, or use as key for WEP)
 
+// void onCloudManualCurrentChange();
+// void onCloudManualButtonChange();
 
 float cloudFrequency;
 float cloudPWM;
 float cloudVoltage;
+int cloudManualCurrent;
+bool cloudManualButton;
 
 void initProperties(){
 
-  ArduinoCloud.addProperty(cloudFrequency, READ, ON_CHANGE, NULL);
-  ArduinoCloud.addProperty(cloudPWM, READ, ON_CHANGE, NULL);
-  ArduinoCloud.addProperty(cloudVoltage, READ, ON_CHANGE, NULL);
+  ArduinoCloud.addProperty(cloudFrequency, READ, 1 * SECONDS, NULL);
+  ArduinoCloud.addProperty(cloudPWM, READ, 1 * SECONDS, NULL);
+  ArduinoCloud.addProperty(cloudVoltage, READ, 1 * SECONDS, NULL);
+  ArduinoCloud.addProperty(cloudManualCurrent, READWRITE, 1 * SECONDS);
+  ArduinoCloud.addProperty(cloudManualButton, READWRITE, 1 * SECONDS);
 
 }
 
 WiFiConnectionHandler ArduinoIoTPreferredConnection(SSID, PASS);
+
