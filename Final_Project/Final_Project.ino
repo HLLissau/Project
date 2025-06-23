@@ -32,14 +32,13 @@ float y_prev = 0.0;                                               // Previous fi
 const int treshold = 248;                                         // 248 is (0.8mV (offset) * 1023) / 3.3V
 #define TRESHOLD_CROSSING_COUNTER true
 int lastMeasurement = 0;                                          // initialize
-volatile byte crossingFlag = 0;                                   // initialize ////////////////////////////////////////////////////////////
-int crossingCounter = 0;                                          // initialize
+volatile int crossingCounter = 0;                                 // initialize
 int sampleCounter = 0;                                            // initialize
 const int amountBeforeCalculateFrequency = 25;                    // number of zero crossing before measuring the frequency
 const float measuredSampleRate = 1.0923 * sampleFrequency;        // corrected sample frequency
 //interpolation  8
-#define INTERPOLATION_ENABLED true && TRESHOLD_CROSSING_COUNTER  //need threshold crossing to work.
-int oldY = 0;                                                    // initialize
+#define INTERPOLATION_ENABLED true && TRESHOLD_CROSSING_COUNTER   // need threshold crossing to work.
+int oldY = 0;                                                     // initialize
 //LED step 10
 #define CONTROL_LED_ENABLED true
 const int lowFreqLED = A4;                                       // pin selection
@@ -260,9 +259,9 @@ void loop() {
 
 
   if (crossingCounter >= amountBeforeCalculateFrequency) {        // ONLY if crossingCounter = threshold second loop starts (after every ISR)
+    crossingCounter = 0;                                          // set again to zero
     static int beginSampleCounter = 0;                            // initialize
     beginSampleCounter = sampleCounter;                           // stores the value of the counter (sample number)
-    crossingCounter = 0;                                          // set again to zero
 
 // interpolation of zero-crossing
 #if INTERPOLATION_ENABLED
