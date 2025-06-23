@@ -1,2 +1,2 @@
-#define SECRET_OPTIONAL_PASS ""
-#define SECRET_SSID ""
+#define SECRET_OPTIONAL_PASS "triceratopo"
+#define SECRET_SSID "albertomaga"
