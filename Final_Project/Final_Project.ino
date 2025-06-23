@@ -20,7 +20,10 @@ const int DACPin = A0;
 const int testpin = A3;
 const int sampleFrequency = 10000;  // max with disabled: 16370 no more than 16400
 const int resolution = 10;          // used for both read and write
-// filtering
+                                    // filtering
+float calculatedFreq = 0;
+;  // initialize
+
 #define FILTER_ENABLED true
 const float deltaT = (1.0 / sampleFrequency);
 const float fc = 50.0;                   // Cutoff frequency in Hz
@@ -34,7 +37,7 @@ const int treshold = 248;  // 248 is (0.8mV (offset) * 1023) / 3.3V
 int lastMeasurement = 0;                                    // initialize
 volatile int crossingCounter = 0;                           // initialize
 int sampleCounter = 0;                                      // initialize
-const int amountBeforeCalculateFrequency = 50;              // number of zero crossing before measuring the frequency
+const int amountBeforeCalculateFrequency = 25;              // number of zero crossing before measuring the frequency
 const float measuredSampleRate = 1.0923 * sampleFrequency;  // corrected sample frequency
 //interpolation  8
 #define INTERPOLATION_ENABLED true && TRESHOLD_CROSSING_COUNTER  // need threshold crossing to work.
@@ -47,6 +50,7 @@ const float lowCutoffFreq = 49.975;   // freq threshold
 const float highCutoffFreq = 50.025;  // freq threshold
 // RMS step12
 #define RMS_ENABLED true
+float rms = 0.0;
 int amountOfRMSDataPoints = 0;  // initialize
 float samples = 0;              // initialize
 float scalingFactor = 1.009;
@@ -89,6 +93,8 @@ float pWMDutyCycle = 0.80;     // PWM level
 const int pWMPin = 7;          // pin selection
 // Cloud
 #define CLOUD_ENABLED true
+int manualLED = 14;
+volatile int manualButtonPin = 8;
 
 // %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% FUNCTIONS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 // AdcBooster
@@ -251,7 +257,7 @@ void setup() {
   analogWriteResolution(resolution);
   pinMode(lowFreqLED, OUTPUT);
   pinMode(highFreqLED, OUTPUT);
-
+  pinMode(manualLED, OUTPUT);
   Serial.begin(9600);
   arduinoCloudSetup();
   MyTimer5.begin(sampleFrequency);          // 200=for toggle every 5msec
@@ -259,11 +265,20 @@ void setup() {
   AdcBooster();
   PWMsetup();
 }
+void display() {
+  if (cloudManualButton) {
+    printToLCD("MANUAL CONTROL  ", 0);  // write on LCD
+    printToLCD("CURR:  " + String(current) + " A ", 1);
 
+  } else {
+    printToLCD("AUTO CONTROL    ", 0);                            // write on LCD
+    printToLCD("FREQ: " + String(calculatedFreq, 3) + " Hz", 1);  // write on LCD
+  }
+  
+}
 // %%%%%%%%%%%%%%%%%%%%%%%%%%%%% LOOP %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 void loop() {
-  static float calculatedFreq;  // initialize
-  // %%%%%%%%%%%%%RUN ONLY IF FLAG in UP
+  // %%%%%%%%%%%%% RUN ONLY IF FLAG in UP
 
 
   if (crossingCounter >= amountBeforeCalculateFrequency) {  // ONLY if crossingCounter = threshold second loop starts (after every ISR)
@@ -282,14 +297,12 @@ void loop() {
     calculatedFreq = crossingCounter / (sampleCounter * (1 / measuredSampleRate));
     sampleCounter = 0;  // only when zero crossing is used sampleCounter is restarted
 #endif
-    printToLCD("FREQ: " + String(calculatedFreq, 3) + " Hz", 0);  // write on LCD
 
 // RMS calculation
 #if RMS_ENABLED
-    float rms = sqrt((samples) / amountOfRMSDataPoints);
+    rms = sqrt((samples) / amountOfRMSDataPoints);
     samples = 0;                // sum of all samples squared initialized
     amountOfRMSDataPoints = 0;  // number of samples between start and end
-                                //printToLCD("VOLT:  " + String(rms) + " V", 1);
 #endif
 // Droop
 #if DROOP_CONTROL_ENABLED
@@ -300,8 +313,7 @@ void loop() {
     }
     pWMDutyCycle = PWMRequest(current);     // PWM treshold calculated
     REG_TCC0_CC3 = pWMDutyCycle * pWMfreq;  // PWM creation on pin designed - TCC0 CC3 - on D7
-    //   printToLCD("cur:  " + String(current) + " A", 1);
-    printToLCD("PWM:  " + String(100 * pWMDutyCycle) + " %", 1);
+
 #endif
 // Led
 #if CONTROL_LED_ENABLED  // always runs and is interrupted by the ISR
@@ -312,13 +324,16 @@ void loop() {
     } else {
       controlLights(0);
     }
+    display();
 #endif
 // Cloud
 #if CLOUD_ENABLED
+
     cloudPWM = 100 * pWMDutyCycle;    // simple update
     cloudFrequency = calculatedFreq;  // simple update
     cloudVoltage = rms;               // simple update
     ArduinoCloud.update();            // Write on cloud
+    digitalWrite(manualLED, cloudManualButton);
 #endif
   }
 }
